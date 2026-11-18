@@ -68,4 +68,4 @@ end)
 
 MIT, see [LICENSE](LICENSE). You can use this in commercial games for free.
 
-Paid installation into an existing game, migration from an old save system, and custom changes are available. Contact: jacobkozin.support@gmail.com, Discord `jacity`, or [jacobkozin.github.io](https://jacobkozin.github.io).
+Paid installation into an existing game, migration from an old save system, and custom changes are available. Contact: jacobkozin.support@gmail.com, the Discord server (https://discord.gg/BJbwDAYGmD), or [jacobkozin.github.io](https://jacobkozin.github.io).
