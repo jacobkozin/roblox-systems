@@ -109,12 +109,12 @@ local function processReceipt(receipt)
 	local player = Players:GetPlayerByUserId(receipt.PlayerId)
 	if not player then
 		-- They left. Roblox will retry the next time they join.
-		return Enum.ProductPurchaseDecision.NotYetProcessed
+		return Enum.ProductPurchaseDecision.NotProcessedYet
 	end
 
 	local data = DataService.WaitFor(player, 15)
 	if not data then
-		return Enum.ProductPurchaseDecision.NotYetProcessed
+		return Enum.ProductPurchaseDecision.NotProcessedYet
 	end
 
 	-- Already granted on a previous attempt? Make sure that grant is actually
@@ -123,19 +123,19 @@ local function processReceipt(receipt)
 		if DataService.SaveNow(player) then
 			return Enum.ProductPurchaseDecision.PurchaseGranted
 		end
-		return Enum.ProductPurchaseDecision.NotYetProcessed
+		return Enum.ProductPurchaseDecision.NotProcessedYet
 	end
 
 	local grant = DEV_PRODUCTS[receipt.ProductId]
 	if not grant then
 		warn("[ShopService] no handler for product", receipt.ProductId)
-		return Enum.ProductPurchaseDecision.NotYetProcessed
+		return Enum.ProductPurchaseDecision.NotProcessedYet
 	end
 
 	local ok, granted = pcall(grant, player)
 	if not ok or granted ~= true then
 		warn("[ShopService] grant failed for product", receipt.ProductId, ok and "(handler returned false)" or granted)
-		return Enum.ProductPurchaseDecision.NotYetProcessed
+		return Enum.ProductPurchaseDecision.NotProcessedYet
 	end
 
 	table.insert(data.ProcessedReceipts, receipt.PurchaseId)
@@ -147,7 +147,7 @@ local function processReceipt(receipt)
 	-- save fails, the receipt is still recorded in memory, so the retry above
 	-- saves again instead of granting twice.
 	if not DataService.SaveNow(player) then
-		return Enum.ProductPurchaseDecision.NotYetProcessed
+		return Enum.ProductPurchaseDecision.NotProcessedYet
 	end
 	return Enum.ProductPurchaseDecision.PurchaseGranted
 end
@@ -155,14 +155,14 @@ end
 MarketplaceService.ProcessReceipt = function(receipt)
 	-- Never handle the same receipt twice at once (the first call may still be saving).
 	if receiptsInProgress[receipt.PurchaseId] then
-		return Enum.ProductPurchaseDecision.NotYetProcessed
+		return Enum.ProductPurchaseDecision.NotProcessedYet
 	end
 	receiptsInProgress[receipt.PurchaseId] = true
 	local ok, decision = pcall(processReceipt, receipt)
 	receiptsInProgress[receipt.PurchaseId] = nil
 	if not ok then
 		warn("[ShopService] ProcessReceipt errored:", decision)
-		return Enum.ProductPurchaseDecision.NotYetProcessed
+		return Enum.ProductPurchaseDecision.NotProcessedYet
 	end
 	return decision
 end
