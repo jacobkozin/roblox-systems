@@ -13,6 +13,8 @@
 	Client usage:
 		local result = ReplicatedStorage.ShopRemotes.Purchase:InvokeServer("SpeedCoil")
 		-- result = { ok = true } or { ok = false, reason = "NotEnoughCoins" }
+
+	MIT licensed. See LICENSE in the repository root.
 ]]
 
 local MarketplaceService = game:GetService("MarketplaceService")
@@ -30,12 +32,15 @@ local CATALOG = {
 }
 
 -- Replace the IDs with your own developer product IDs.
-local DEV_PRODUCTS: { [number]: (Player) -> () } = {
+-- Each handler must return true once the reward is applied. Returning
+-- false/nil (or erroring) means "not granted", and Roblox will retry later.
+-- Handlers should only change the player's data table; ShopService saves it.
+local DEV_PRODUCTS: { [number]: (Player) -> boolean } = {
 	[1111111111] = function(player)
-		DataService.Increment(player, "Coins", 1000)
+		return DataService.Increment(player, "Coins", 1000) ~= nil
 	end,
 	[2222222222] = function(player)
-		DataService.Increment(player, "Coins", 5000)
+		return DataService.Increment(player, "Coins", 5000) ~= nil
 	end,
 }
 
@@ -60,6 +65,7 @@ remotes.Parent = ReplicatedStorage
 local ShopService = {}
 local lastRequest: { [Player]: number } = {}
 local passCache: { [Player]: { [number]: boolean } } = {}
+local receiptsInProgress: { [string]: boolean } = {}
 
 -- Coin shop --------------------------------------------------------------
 
@@ -99,7 +105,7 @@ purchaseRemote.OnServerInvoke = purchase
 
 -- Developer products -----------------------------------------------------
 
-MarketplaceService.ProcessReceipt = function(receipt)
+local function processReceipt(receipt)
 	local player = Players:GetPlayerByUserId(receipt.PlayerId)
 	if not player then
 		-- They left. Roblox will retry the next time they join.
@@ -111,9 +117,13 @@ MarketplaceService.ProcessReceipt = function(receipt)
 		return Enum.ProductPurchaseDecision.NotYetProcessed
 	end
 
-	-- Already granted on a previous attempt? Then just confirm it.
+	-- Already granted on a previous attempt? Make sure that grant is actually
+	-- saved (a previous save may have failed) before confirming it.
 	if table.find(data.ProcessedReceipts, receipt.PurchaseId) then
-		return Enum.ProductPurchaseDecision.PurchaseGranted
+		if DataService.SaveNow(player) then
+			return Enum.ProductPurchaseDecision.PurchaseGranted
+		end
+		return Enum.ProductPurchaseDecision.NotYetProcessed
 	end
 
 	local grant = DEV_PRODUCTS[receipt.ProductId]
@@ -122,9 +132,9 @@ MarketplaceService.ProcessReceipt = function(receipt)
 		return Enum.ProductPurchaseDecision.NotYetProcessed
 	end
 
-	local ok, err = pcall(grant, player)
-	if not ok then
-		warn("[ShopService] grant failed:", err)
+	local ok, granted = pcall(grant, player)
+	if not ok or granted ~= true then
+		warn("[ShopService] grant failed for product", receipt.ProductId, ok and "(handler returned false)" or granted)
 		return Enum.ProductPurchaseDecision.NotYetProcessed
 	end
 
@@ -133,11 +143,28 @@ MarketplaceService.ProcessReceipt = function(receipt)
 		table.remove(data.ProcessedReceipts, 1)
 	end
 
-	-- Only confirm once the grant and the receipt are safely saved.
+	-- Only confirm once the grant and the receipt are safely saved. If this
+	-- save fails, the receipt is still recorded in memory, so the retry above
+	-- saves again instead of granting twice.
 	if not DataService.SaveNow(player) then
 		return Enum.ProductPurchaseDecision.NotYetProcessed
 	end
 	return Enum.ProductPurchaseDecision.PurchaseGranted
+end
+
+MarketplaceService.ProcessReceipt = function(receipt)
+	-- Never handle the same receipt twice at once (the first call may still be saving).
+	if receiptsInProgress[receipt.PurchaseId] then
+		return Enum.ProductPurchaseDecision.NotYetProcessed
+	end
+	receiptsInProgress[receipt.PurchaseId] = true
+	local ok, decision = pcall(processReceipt, receipt)
+	receiptsInProgress[receipt.PurchaseId] = nil
+	if not ok then
+		warn("[ShopService] ProcessReceipt errored:", decision)
+		return Enum.ProductPurchaseDecision.NotYetProcessed
+	end
+	return decision
 end
 
 -- Game passes ------------------------------------------------------------

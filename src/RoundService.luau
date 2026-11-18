@@ -11,6 +11,8 @@
 	Setup:
 		ServerStorage.Maps.<MapName>  (Model)
 		  └─ Spawns (Folder of Parts)
+
+	MIT licensed. See LICENSE in the repository root.
 ]]
 
 local Players = game:GetService("Players")
@@ -68,11 +70,9 @@ local function pickMap(): Model?
 	return options[math.random(#options)]:Clone()
 end
 
-local function runRound(map: Model)
+local function runRound(map: Model): { Player }
 	local alive: { [Player]: boolean } = {}
 	local connections: { RBXScriptConnection } = {}
-	local spawns = map:FindFirstChild("Spawns")
-	local spawnParts = if spawns then spawns:GetChildren() else {}
 
 	local function aliveCount(): number
 		local n = 0
@@ -82,33 +82,68 @@ local function runRound(map: Model)
 		return n
 	end
 
-	for i, player in Players:GetPlayers() do
-		local character = player.Character
-		local humanoid = character and character:FindFirstChildOfClass("Humanoid")
-		if humanoid and humanoid.Health > 0 and #spawnParts > 0 then
-			local spawnPart = spawnParts[(i - 1) % #spawnParts + 1]
-			character:PivotTo(spawnPart.CFrame + Vector3.new(0, 4, 0))
-			alive[player] = true
-			table.insert(connections, humanoid.Died:Connect(function()
-				alive[player] = nil
-			end))
+	local ok, err = pcall(function()
+		local spawnParts: { BasePart } = {}
+		local spawns = map:FindFirstChild("Spawns")
+		if spawns then
+			for _, child in spawns:GetChildren() do
+				if child:IsA("BasePart") then
+					table.insert(spawnParts, child)
+				end
+			end
 		end
-	end
+		if #spawnParts == 0 then
+			warn("[RoundService] map", map.Name, "has no Spawns folder with Parts in it")
+			return
+		end
 
-	table.insert(connections, Players.PlayerRemoving:Connect(function(player)
-		alive[player] = nil
-	end))
+		for i, player in Players:GetPlayers() do
+			local character = player.Character
+			local humanoid = character and character:FindFirstChildOfClass("Humanoid")
+			if character and humanoid and humanoid.Health > 0 then
+				local spawnPart = spawnParts[(i - 1) % #spawnParts + 1]
+				character:PivotTo(spawnPart.CFrame + Vector3.new(0, 4, 0))
+				alive[player] = true
+				table.insert(
+					connections,
+					humanoid.Died:Connect(function()
+						alive[player] = nil
+					end)
+				)
+				-- Covers characters removed without dying (reset scripts, LoadCharacter, falling apart).
+				table.insert(
+					connections,
+					player.CharacterRemoving:Connect(function()
+						alive[player] = nil
+					end)
+				)
+			end
+		end
 
-	setState("InRound", CONFIG.RoundLength)
-	local startedWith = aliveCount()
-	countdown(CONFIG.RoundLength, function()
-		-- Solo testing: keep going while the one player is alive.
-		local left = aliveCount()
-		return if startedWith > 1 then left > 1 else left > 0
+		table.insert(
+			connections,
+			Players.PlayerRemoving:Connect(function(player)
+				alive[player] = nil
+			end)
+		)
+
+		setState("InRound", CONFIG.RoundLength)
+		local startedWith = aliveCount()
+		countdown(CONFIG.RoundLength, function()
+			-- Solo testing: keep going while the one player is alive.
+			local left = aliveCount()
+			return if startedWith > 1 then left > 1 else left > 0
+		end)
 	end)
 
+	-- Always disconnect, even if the round errored.
 	for _, connection in connections do
 		connection:Disconnect()
+	end
+
+	if not ok then
+		warn("[RoundService] round errored:", err)
+		return {}
 	end
 
 	local winners = {}
@@ -142,11 +177,7 @@ function RoundService.Start()
 			map.Parent = workspace
 			stateObject:SetAttribute("Map", map.Name)
 
-			local ok, winners = pcall(runRound, map)
-			if not ok then
-				warn("[RoundService] round errored:", winners)
-				winners = {}
-			end
+			local winners = runRound(map)
 
 			setState("Ending", CONFIG.EndingDelay)
 			RoundService.RoundEnded:Fire(winners)

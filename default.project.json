@@ -1,0 +1,11 @@
+{
+	"name": "roblox-systems",
+	"tree": {
+		"$className": "DataModel",
+		"ServerScriptService": {
+			"Systems": {
+				"$path": "src"
+			}
+		}
+	}
+}
